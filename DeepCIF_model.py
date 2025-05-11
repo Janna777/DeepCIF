@@ -3,9 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# from timm.models.layers import trunc_normal_, DropPath
-
-
 class Block(nn.Module):
     """ ConvNeXtV2 Block.
 
@@ -16,9 +13,9 @@ class Block(nn.Module):
 
     def __init__(self, dim, drop_path=0.):
         super().__init__()
-        self.dwconv = nn.Conv3d(dim, dim, kernel_size=(3, 5, 5), padding=(1, 2, 2), groups=dim)  # depthwise conv
+        self.dwconv = nn.Conv3d(dim, dim, kernel_size=(3, 5, 5), padding=(1, 2, 2), groups=dim)
         self.norm = LayerNorm(dim, eps=1e-6)
-        self.pwconv1 = nn.Linear(dim, 4 * dim)  # pointwise/1x1 convs, implemented with linear layers
+        self.pwconv1 = nn.Linear(dim, 4 * dim)
         self.act = nn.GELU()
         self.grn = GRN(4 * dim)
         self.pwconv2 = nn.Linear(4 * dim, dim)
@@ -27,13 +24,13 @@ class Block(nn.Module):
     def forward(self, x):
         input = x
         x = self.dwconv(x)
-        x = x.permute(0, 2, 3, 4, 1)  # (N, C, H, W) -> (N, H, W, C)
+        x = x.permute(0, 2, 3, 4, 1)
         x = self.norm(x)
         x = self.pwconv1(x)
         x = self.act(x)
         x = self.grn(x)
         x = self.pwconv2(x)
-        x = x.permute(0, 4, 1, 2, 3)  # (N, H, W, C) -> (N, C, H, W)
+        x = x.permute(0, 4, 1, 2, 3)
 
         x = input + self.drop_path(x)
         return x
@@ -117,7 +114,7 @@ class ConvNeXtV2(nn.Module):
             )
             self.downsample_layers.append(downsample_layer)
 
-        self.stages = nn.ModuleList()  # 4 feature resolution stages, each consisting of multiple residual blocks
+        self.stages = nn.ModuleList()
         dp_rates = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]
         cur = 0
         for i in range(4):
@@ -127,35 +124,23 @@ class ConvNeXtV2(nn.Module):
             self.stages.append(stage)
             cur += depths[i]
 
-        self.norm = nn.LayerNorm(dims[-1], eps=1e-6)  # final norm layer
+        self.norm = nn.LayerNorm(dims[-1], eps=1e-6)
         self.head = nn.Linear(dims[-1], num_classes)
 
-        # self.apply(self._init_weights)
         self.head.weight.data.mul_(head_init_scale)
         self.head.bias.data.mul_(head_init_scale)
-        self.lin1 = nn.Linear(6, 6)  # 改
-        self.lin5 = nn.Linear(134, 128)  # 改
+        self.lin1 = nn.Linear(6, 6)
+        self.lin5 = nn.Linear(134, 128)
         self.lin6 = nn.Linear(128, 64)
-        self.lin7 = nn.Linear(64, 1)  # 改
-        # self.leakyrelu = nn.LeakyReLU(negative_slope=0.1)
-        self.act = nn.GELU()
+        self.lin7 = nn.Linear(64, 1)
 
-    # def _init_weights(self, m):
-    #     if isinstance(m, (nn.Conv2d, nn.Linear)):
-    #         trunc_normal_(m.weight, std=.02)
-    #         nn.init.constant_(m.bias, 0)
+        self.act = nn.GELU()
 
     def forward_features(self, x):
         for i in range(4):
             x = self.downsample_layers[i](x)
             x = self.stages[i](x)
-        return self.norm(x.mean([-3, -2, -1]))  # global average pooling, (N, C, H, W) -> (N, C)
-
-    # def forward(self, x):
-    #     x = self.forward_features(x)
-    #     print(x.size())
-    #     x = self.head(x)
-    #     return x
+        return self.norm(x.mean([-3, -2, -1]))
 
     def forward(self, x, cell):
         x = self.forward_features(x)
@@ -171,11 +156,5 @@ class ConvNeXtV2(nn.Module):
         return outputs
 
 
-# 至此resnet的基本框架就写好了
-# ——————————————————————————————————————————————————————————————————————————————————
-# 下面定义不同层的resnet
-
-
 def convnext(include_top=True):
-    # https://download.pytorch.org/models/resnet50-19c8e357.pth
     return ConvNeXtV2(depths=[2, 2, 6, 2], dims=[40, 80, 160, 320], num_classes=128)
